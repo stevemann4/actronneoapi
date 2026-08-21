@@ -30,6 +30,7 @@ from .base import (
     RealtimeEventKind,
     RealtimeMessage,
     RealtimeTransportType,
+    loads_repairing_escapes,
     new_event_queue,
     put_event_dropping_oldest,
 )
@@ -437,7 +438,7 @@ class MQTTRTClient:
     def _decode_payload(raw_payload: bytes) -> dict[str, Any]:
         """Decode an MQTT payload into a JSON object."""
         decoded = raw_payload.decode("utf-8")
-        payload = json.loads(decoded)
+        payload = loads_repairing_escapes(decoded)
         if not isinstance(payload, dict):
             raise ValueError("MQTT payload must decode to a JSON object")
         return payload

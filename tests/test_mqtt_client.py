@@ -1301,3 +1301,23 @@ class TestMQTTPayloadDiagnostics:
 
         assert "MQTT payload must decode to a JSON object" in caplog.text
         assert "offending fragment" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_apostrophe_in_a_zone_title_is_not_dropped(self) -> None:
+        r"""A payload the cloud escapes as ``\'`` must still reach subscribers.
+
+        The Actron cloud escapes apostrophes inside string values, which JSON
+        forbids. A zone named "Kurt's Office" made every full-status for that
+        account unparseable, so the whole snapshot was discarded.
+        """
+        client = self._client()
+        seen: list[RealtimeMessage] = []
+        client.register_callback(seen.append)  # type: ignore[arg-type]
+
+        await client._handle_message(  # noqa: SLF001
+            "actron-cloud/user-1/neo/abc123/mwc/full-status",
+            b'{"RemoteZoneInfo":[{"NV_Title":"Kurt\\\'s Office"}]}',
+        )
+
+        assert len(seen) == 1
+        assert seen[0].payload == {"RemoteZoneInfo": [{"NV_Title": "Kurt's Office"}]}
