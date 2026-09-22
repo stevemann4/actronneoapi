@@ -581,7 +581,7 @@ class ActronAirAPI:
             if not token:
                 raise ActronAirAuthError("No OAuth access token available for realtime transport")
 
-            if self.platform == PLATFORM_QUE:
+            if self._realtime_details_use_signalr(details):
                 # Reuse the API session so an injected one covers the realtime
                 # transport too. The transport only closes a session it created
                 # itself, and every request it makes carries its own timeout,
@@ -593,6 +593,7 @@ class ActronAirAPI:
                     await self._resolve_mqtt_username(),
                     token,
                     client_id=client_id,
+                    platform_segment=self.platform,
                 )
 
             if rt_client is None:
@@ -631,6 +632,19 @@ class ActronAirAPI:
             _LOGGER.exception("Unexpected error starting realtime push; falling back to polling")
             await self._cleanup_failed_push(rt_client)
             return False
+
+    @staticmethod
+    def _realtime_details_use_signalr(details: RealtimeConnectionDetails) -> bool:
+        """Return whether connection details describe a SignalR (HTTP) endpoint.
+
+        The transport is chosen from the details themselves rather than the
+        platform: both Neo and Que clouds publish an MQTT broker through
+        ``api/v0/messaging/connection/details``, and only the documented Que
+        SignalR path is an HTTP endpoint.
+        """
+        protocol = details.protocol.strip().lower()
+        endpoint = details.endpoint.strip().lower()
+        return protocol in {"http", "https"} or endpoint.startswith(("http://", "https://"))
 
     async def _resolve_mqtt_username(self) -> str:
         """Return the account email used to identify MQTT broker connections.
@@ -804,20 +818,21 @@ class ActronAirAPI:
                     _LOGGER.debug("Realtime details link %s lookup failed", rel, exc_info=True)
 
         # APK evidence (Retrofit base URL includes /api/v0/) resolves this to
-        # /api/v0/messaging/connection/details.
-        if self.platform == PLATFORM_NEO:
-            endpoint = "api/v0/messaging/connection/details"
-            try:
-                payload = await self._make_request("get", endpoint)
-                details = self._parse_realtime_details_payload(payload)
-                if details is not None:
-                    return details
-            except Exception:
-                _LOGGER.debug(
-                    "Realtime details endpoint lookup failed for %s",
-                    endpoint,
-                    exc_info=True,
-                )
+        # /api/v0/messaging/connection/details. The Que cloud serves the same
+        # endpoint with the same MQTT broker shape, so it is probed for both
+        # platforms before falling back to the Que SignalR path.
+        endpoint = "api/v0/messaging/connection/details"
+        try:
+            payload = await self._make_request("get", endpoint)
+            details = self._parse_realtime_details_payload(payload)
+            if details is not None:
+                return details
+        except Exception:
+            _LOGGER.debug(
+                "Realtime details endpoint lookup failed for %s",
+                endpoint,
+                exc_info=True,
+            )
 
         # Que fallback endpoint from documented SignalR path.
         if self.platform == PLATFORM_QUE:

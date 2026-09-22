@@ -1444,3 +1444,23 @@ class TestNeoGetAllOnConnect:
             "actron-cloud/user-1/neo/abc123/app/cmd",
             "actron-cloud/user-1/neo/def456/app/cmd",
         ]
+
+
+class TestPlatformSegment:
+    """Topic paths carry the platform segment of the system being subscribed."""
+
+    def test_build_topic_set_with_que_segment(self) -> None:
+        topics = MQTTRTClient.build_topic_set("user-1", "21J07604", platform_segment="que")
+        assert topics.full_status == "actron-cloud/user-1/que/21j07604/mwc/full-status"
+        assert topics.status_change == "actron-cloud/user-1/que/21j07604/mwc/status-change"
+        assert MQTTRTClient.build_command_topic("user-1", "21J07604", platform_segment="que") == (
+            "actron-cloud/user-1/que/21j07604/app/cmd"
+        )
+
+    def test_default_segment_is_neo(self) -> None:
+        topics = MQTTRTClient.build_topic_set("user-1", "ABC123")
+        assert topics.full_status == "actron-cloud/user-1/neo/abc123/mwc/full-status"
+
+    def test_empty_segment_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            MQTTRTClient.build_topic_set("user-1", "ABC123", platform_segment=" ")
