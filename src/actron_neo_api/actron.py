@@ -593,7 +593,7 @@ class ActronAirAPI:
                     await self._resolve_mqtt_username(),
                     token,
                     client_id=client_id,
-                    platform_segment=self.platform,
+                    platform_segment=self._mqtt_platform_segment(),
                 )
 
             if rt_client is None:
@@ -632,6 +632,14 @@ class ActronAirAPI:
             _LOGGER.exception("Unexpected error starting realtime push; falling back to polling")
             await self._cleanup_failed_push(rt_client)
             return False
+
+    def _mqtt_platform_segment(self) -> str:
+        """Return the platform element of this account's MQTT topic paths.
+
+        Neo devices publish under ``neo``; Que devices publish under ``QUE``
+        (the broker treats topic names as case-sensitive).
+        """
+        return "QUE" if self.platform == PLATFORM_QUE else "neo"
 
     @staticmethod
     def _realtime_details_use_signalr(details: RealtimeConnectionDetails) -> bool:
@@ -976,10 +984,14 @@ class ActronAirAPI:
             broadcast or cannot be validated.
         """
         event = payload.get("event")
-        if not isinstance(event, dict) or event.get("type") != "full-status-broadcast":
+        if isinstance(event, dict) and event.get("type") == "full-status-broadcast":
+            last_known_state = {key: value for key, value in event.items() if key != "type"}
+        elif payload.get("type") == "full-status-broadcast":
+            metadata = ActronAirAPI._mqtt_status_change_metadata_keys()
+            last_known_state = {key: value for key, value in payload.items() if key not in metadata}
+        else:
             return None
 
-        last_known_state = {key: value for key, value in event.items() if key != "type"}
         if not last_known_state:
             return None
 
@@ -1079,13 +1091,20 @@ class ActronAirAPI:
         """Return the state-bearing body of a status-change-broadcast payload.
 
         Neo wraps realtime deltas in ``payload["event"]`` with a ``type``
-        marker; every other key in that dict is a state delta.
+        marker; every other key in that dict is a state delta. Que sends the
+        delta flat at the top level with the marker beside it.
         """
         event = payload.get("event")
-        if not isinstance(event, dict) or event.get("type") != "status-change-broadcast":
-            return None
-        body = {key: value for key, value in event.items() if key != "type"}
-        return body or None
+        if isinstance(event, dict) and event.get("type") == "status-change-broadcast":
+            body = {key: value for key, value in event.items() if key != "type"}
+            return body or None
+        # Que publishes the same flat delta at the top level, with the type
+        # marker and firmware version beside the state keys.
+        if payload.get("type") == "status-change-broadcast":
+            metadata = ActronAirAPI._mqtt_status_change_metadata_keys()
+            body = {key: value for key, value in payload.items() if key not in metadata}
+            return body or None
+        return None
 
     @classmethod
     def _apply_broadcast_delta(
@@ -1231,6 +1250,7 @@ class ActronAirAPI:
         """Return top-level status-change keys that are metadata, not state."""
         return {
             "event",
+            "type",
             "wcFirmware",
             "correlationId",
             "commandResponse",
@@ -1243,13 +1263,19 @@ class ActronAirAPI:
 
     @staticmethod
     def _is_mqtt_status_change_topic(topic: str) -> bool:
-        """Return whether a realtime topic is the Neo status-change channel."""
-        return topic.endswith("/mwc/status-change")
+        """Return whether a realtime topic is a status-change channel.
+
+        Neo uses ``mwc/status-change``; Que uses ``mwc/status-change-broadcast``.
+        """
+        return topic.endswith(("/mwc/status-change", "/mwc/status-change-broadcast"))
 
     @staticmethod
     def _is_mqtt_full_status_topic(topic: str) -> bool:
-        """Return whether a realtime topic is the Neo full-status channel."""
-        return topic.endswith("/mwc/full-status")
+        """Return whether a realtime topic is a full-status channel.
+
+        Neo uses ``mwc/full-status``; Que uses ``mwc/full-status-broadcast``.
+        """
+        return topic.endswith(("/mwc/full-status", "/mwc/full-status-broadcast"))
 
     @staticmethod
     def _extract_realtime_serial(

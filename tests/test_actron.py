@@ -2927,7 +2927,7 @@ class TestQueRealtimeTransportSelection:
         assert started is True
         assert isinstance(api._rt_client, _FakeMQTT)
         assert api._rt_client.subscribed == ["21j07604"]
-        assert api._rt_client.platform_segment == "que"
+        assert api._rt_client.platform_segment == "QUE"
 
     @pytest.mark.asyncio
     async def test_start_push_on_que_keeps_signalr_for_http_details(self) -> None:
@@ -2976,3 +2976,94 @@ class TestQueRealtimeTransportSelection:
         assert started is True
         assert isinstance(api._rt_client, _FakeSignalR)
         assert api._rt_client.subscribed == ["21j07604"]
+
+
+class TestQueRealtimePayloads:
+    """Que broadcasts arrive flat, on -broadcast topics, under a QUE segment."""
+
+    QUE_TOPIC = (
+        "actron-cloud/80df2de0-0899-4510-bc61-c48ab135c73c/QUE/21j07604/mwc/status-change-broadcast"
+    )
+
+    def test_topic_predicates_accept_que_channels(self) -> None:
+        assert ActronAirAPI._is_mqtt_status_change_topic(self.QUE_TOPIC)
+        assert ActronAirAPI._is_mqtt_status_change_topic("x/neo/abc/mwc/status-change")
+        assert not ActronAirAPI._is_mqtt_status_change_topic("x/neo/abc/mwc/full-status")
+        assert ActronAirAPI._is_mqtt_full_status_topic(
+            "actron-cloud/u/QUE/21j07604/mwc/full-status-broadcast"
+        )
+        assert ActronAirAPI._is_mqtt_full_status_topic("x/neo/abc/mwc/full-status")
+
+    def test_flat_status_change_broadcast_body(self) -> None:
+        payload = {
+            "RemoteZoneInfo[6].LiveTemp_oC": 20.8,
+            "type": "status-change-broadcast",
+            "wcFirmware": "1.456.1.598",
+        }
+        assert ActronAirAPI._status_change_broadcast(payload) == {
+            "RemoteZoneInfo[6].LiveTemp_oC": 20.8
+        }
+        assert ActronAirAPI._mqtt_status_change_contains_state(payload)
+        # A marker-only message carries no state.
+        assert (
+            ActronAirAPI._status_change_broadcast(
+                {"type": "status-change-broadcast", "wcFirmware": "1.456.1.598"}
+            )
+            is None
+        )
+
+    def test_neo_wrapped_broadcast_still_recognised(self) -> None:
+        payload = {"event": {"type": "status-change-broadcast", "MasterInfo.LiveHumidity_pc": 64.2}}
+        assert ActronAirAPI._status_change_broadcast(payload) == {
+            "MasterInfo.LiveHumidity_pc": 64.2
+        }
+
+    @pytest.mark.asyncio
+    async def test_que_flat_delta_merges_into_cached_state(self) -> None:
+        api = ActronAirAPI(platform="que")
+        base = ActronAirStatus(
+            isOnline=True,
+            lastKnownState={
+                "MasterInfo": {"LiveHumidity_pc": 60.0, "LiveTemp_oC": 21.0},
+                "RemoteZoneInfo": [
+                    {"NV_Title": "Z0", "LiveTemp_oC": 20.0},
+                    {"NV_Title": "Z1", "LiveTemp_oC": 20.0},
+                ],
+                "UserAirconSettings": {"isOn": True, "Mode": "HEAT", "EnabledZones": [True, False]},
+            },
+        )
+        api.state_manager.process_status_update("21j07604", base)
+
+        merged = await api._merge_mqtt_status_change(
+            "21j07604",
+            {
+                "RemoteZoneInfo[1].LiveTemp_oC": 22.5,
+                "MasterInfo.LiveHumidity_pc": 64.2,
+                "type": "status-change-broadcast",
+                "wcFirmware": "1.456.1.598",
+            },
+        )
+        assert merged is not None
+        assert merged.last_known_state["RemoteZoneInfo"][1]["LiveTemp_oC"] == 22.5
+        assert merged.last_known_state["MasterInfo"]["LiveHumidity_pc"] == 64.2
+        assert merged.last_known_state["RemoteZoneInfo"][0]["LiveTemp_oC"] == 20.0
+        assert "type" not in merged.last_known_state
+        assert "wcFirmware" not in merged.last_known_state
+
+    def test_flat_full_status_broadcast_parsed(self) -> None:
+        status = ActronAirAPI._parse_full_status_broadcast(
+            "21j07604",
+            {
+                "type": "full-status-broadcast",
+                "wcFirmware": "1.456.1.598",
+                "UserAirconSettings": {"isOn": True, "Mode": "COOL"},
+                "RemoteZoneInfo": [],
+            },
+        )
+        assert status is not None
+        assert status.user_aircon_settings.mode == "COOL"
+        assert "type" not in status.last_known_state
+
+    def test_mqtt_platform_segment_by_platform(self) -> None:
+        assert ActronAirAPI(platform="que")._mqtt_platform_segment() == "QUE"
+        assert ActronAirAPI(platform="neo")._mqtt_platform_segment() == "neo"
