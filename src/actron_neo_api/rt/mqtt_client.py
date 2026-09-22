@@ -549,16 +549,16 @@ class MQTTRTClient:
 
         domain_model: Any | None = None
 
-        if topic.endswith(
-            (_MQTT_TOPIC_FULL_STATUS, _MQTT_TOPIC_FULL_STATUS + _MQTT_TOPIC_BROADCAST_SUFFIX)
-        ):
+        if topic.endswith(_MQTT_TOPIC_BROADCAST_SUFFIX):
+            # Que broadcasts are bare state blocks or flat deltas; the API
+            # layer rebuilds the status from them, so no model is attempted here.
+            domain_model = None
+        elif topic.endswith(_MQTT_TOPIC_FULL_STATUS):
             try:
                 domain_model = ActronAirStatus.model_validate(payload)
             except Exception as exc:  # pragma: no cover - defensive parsing
                 _LOGGER.warning("Failed to parse MQTT full-status payload: %s", exc)
-        elif topic.endswith(
-            (_MQTT_TOPIC_STATUS_CHANGE, _MQTT_TOPIC_STATUS_CHANGE + _MQTT_TOPIC_BROADCAST_SUFFIX)
-        ):
+        elif topic.endswith(_MQTT_TOPIC_STATUS_CHANGE):
             try:
                 domain_model = ActronAirStatus.model_validate(payload)
             except Exception:

@@ -1513,3 +1513,19 @@ class TestQueSubscriptions:
         assert isinstance(event, RealtimeMessage)
         assert event.topic.endswith("/mwc/status-change-broadcast")
         assert event.payload["RemoteZoneInfo[6].LiveTemp_oC"] == 20.8
+
+    @pytest.mark.asyncio
+    async def test_full_status_broadcast_is_forwarded_without_model(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A bare Que snapshot is passed through untouched and without warnings."""
+        client = self._client()
+        await client._handle_message(  # noqa: SLF001
+            "actron-cloud/user-1/QUE/21j03262/mwc/full-status-broadcast",
+            b'{"<21J03262>":{"Cloud":{}},"RemoteZoneInfo":[{"CanOperate":true}]}',
+        )
+        event = client._event_queue.get_nowait()  # noqa: SLF001
+        assert isinstance(event, RealtimeMessage)
+        assert event.domain_model is None
+        assert event.payload["RemoteZoneInfo"][0]["CanOperate"] is True
+        assert "Failed to parse" not in caplog.text
