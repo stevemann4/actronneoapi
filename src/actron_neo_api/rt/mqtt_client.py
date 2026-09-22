@@ -112,10 +112,13 @@ class MQTTRTClient:
         reconnect_initial_delay: float = _MQTT_DEFAULT_RECONNECT_DELAY,
         reconnect_max_delay: float = _MQTT_MAX_RECONNECT_DELAY,
         event_queue_maxsize: int = DEFAULT_EVENT_QUEUE_MAXSIZE,
+        platform_segment: str = _MQTT_PLATFORM_SEGMENT,
     ) -> None:
         """Initialize the MQTT realtime client."""
         if not access_token.strip():
             raise ValueError("access_token cannot be empty")
+        if not platform_segment.strip():
+            raise ValueError("platform_segment cannot be empty")
         if keepalive <= 0:
             raise ValueError("keepalive must be greater than zero")
         if connect_timeout <= 0:
@@ -129,6 +132,7 @@ class MQTTRTClient:
 
         self._details = connection_details
         self._access_token = access_token
+        self._platform_segment = platform_segment.strip().lower()
         # The broker only uses the username to attribute a connection, so an
         # unusable value is normalized rather than rejected.
         self._user_email = user_email.strip() or _MQTT_UNKNOWN_USERNAME
@@ -181,16 +185,23 @@ class MQTTRTClient:
         user_id: str,
         device_serial: str,
         machine_id: str | None = None,
+        platform_segment: str = _MQTT_PLATFORM_SEGMENT,
     ) -> NeoMQTTTopicSet:
-        """Build the standard MQTT topic set for a Neo device."""
+        """Build the standard MQTT topic set for a device.
+
+        ``platform_segment`` is the platform element of the topic path
+        (``neo`` for Neo systems, ``que`` for Que systems).
+        """
         if not user_id.strip():
             raise ValueError("user_id cannot be empty")
         if not device_serial.strip():
             raise ValueError("device_serial cannot be empty")
+        if not platform_segment.strip():
+            raise ValueError("platform_segment cannot be empty")
 
         serial = device_serial.lower()
         machine_segment = machine_id or "+"
-        base = f"{_MQTT_TOPIC_PREFIX}/{user_id}/{_MQTT_PLATFORM_SEGMENT}/{serial}"
+        base = f"{_MQTT_TOPIC_PREFIX}/{user_id}/{platform_segment}/{serial}"
         return NeoMQTTTopicSet(
             heart_beat=f"{base}/{_MQTT_TOPIC_HEART_BEAT}",
             full_status=f"{base}/{_MQTT_TOPIC_FULL_STATUS}",
@@ -199,17 +210,22 @@ class MQTTRTClient:
         )
 
     @staticmethod
-    def build_command_topic(user_id: str, device_serial: str) -> str:
-        """Build the topic a Neo device accepts app commands on."""
+    def build_command_topic(
+        user_id: str,
+        device_serial: str,
+        platform_segment: str = _MQTT_PLATFORM_SEGMENT,
+    ) -> str:
+        """Build the topic a device accepts app commands on."""
         if not user_id.strip():
             raise ValueError("user_id cannot be empty")
         if not device_serial.strip():
             raise ValueError("device_serial cannot be empty")
+        if not platform_segment.strip():
+            raise ValueError("platform_segment cannot be empty")
 
         serial = device_serial.lower()
         return (
-            f"{_MQTT_TOPIC_PREFIX}/{user_id}/{_MQTT_PLATFORM_SEGMENT}/{serial}"
-            f"/{_MQTT_TOPIC_APP_COMMAND}"
+            f"{_MQTT_TOPIC_PREFIX}/{user_id}/{platform_segment}/{serial}/{_MQTT_TOPIC_APP_COMMAND}"
         )
 
     def register_callback(
@@ -284,7 +300,12 @@ class MQTTRTClient:
         machine_id: str | None = None,
     ) -> NeoMQTTTopicSet:
         """Subscribe to the standard Neo topic set for a device."""
-        topics = self.build_topic_set(self._details.user_id, device_serial, machine_id)
+        topics = self.build_topic_set(
+            self._details.user_id,
+            device_serial,
+            machine_id,
+            platform_segment=self._platform_segment,
+        )
         await self.subscribe(topics.heart_beat)
         await self.subscribe(topics.full_status)
         await self.subscribe(topics.cmd_response)
@@ -311,7 +332,9 @@ class MQTTRTClient:
         if self._client is None:
             return False
 
-        topic = self.build_command_topic(self._details.user_id, device_serial)
+        topic = self.build_command_topic(
+            self._details.user_id, device_serial, platform_segment=self._platform_segment
+        )
         payload = {
             "command": {"type": _MQTT_COMMAND_GET_ALL},
             # The response is routed back on a cmd-response topic scoped to the
@@ -333,7 +356,12 @@ class MQTTRTClient:
         machine_id: str | None = None,
     ) -> None:
         """Remove the standard Neo topic subscriptions for a device."""
-        topics = self.build_topic_set(self._details.user_id, device_serial, machine_id)
+        topics = self.build_topic_set(
+            self._details.user_id,
+            device_serial,
+            machine_id,
+            platform_segment=self._platform_segment,
+        )
         await self.unsubscribe(topics.heart_beat)
         await self.unsubscribe(topics.full_status)
         await self.unsubscribe(topics.cmd_response)
