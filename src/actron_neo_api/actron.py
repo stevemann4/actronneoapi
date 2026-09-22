@@ -46,6 +46,16 @@ from .state import StateManager
 
 _LOGGER = logging.getLogger(__name__)
 
+# Top-level sections of a lastKnownState block; their presence identifies a
+# bare state snapshot published without any wrapper.
+_STATE_SECTION_KEYS = (
+    "AirconSystem",
+    "UserAirconSettings",
+    "RemoteZoneInfo",
+    "LiveAircon",
+    "MasterInfo",
+)
+
 # Segments of a flat broadcast key: a name, or a bracketed list index.
 _FLAT_KEY_SEGMENT_RE = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
 
@@ -984,10 +994,14 @@ class ActronAirAPI:
             broadcast or cannot be validated.
         """
         event = payload.get("event")
+        metadata = ActronAirAPI._mqtt_status_change_metadata_keys()
         if isinstance(event, dict) and event.get("type") == "full-status-broadcast":
             last_known_state = {key: value for key, value in event.items() if key != "type"}
-        elif payload.get("type") == "full-status-broadcast":
-            metadata = ActronAirAPI._mqtt_status_change_metadata_keys()
+        elif payload.get("type") == "full-status-broadcast" or any(
+            section in payload for section in _STATE_SECTION_KEYS
+        ):
+            # Que publishes the bare state block on the full-status channel:
+            # the well-known sections sit at the top level next to the marker.
             last_known_state = {key: value for key, value in payload.items() if key not in metadata}
         else:
             return None

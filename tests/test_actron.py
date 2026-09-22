@@ -3067,3 +3067,26 @@ class TestQueRealtimePayloads:
     def test_mqtt_platform_segment_by_platform(self) -> None:
         assert ActronAirAPI(platform="que")._mqtt_platform_segment() == "QUE"
         assert ActronAirAPI(platform="neo")._mqtt_platform_segment() == "neo"
+
+
+class TestQueFullStatusSnapshot:
+    """A bare state block on the full-status channel is a complete snapshot."""
+
+    def test_bare_state_block_without_marker_is_parsed(self) -> None:
+        status = ActronAirAPI._parse_full_status_broadcast(
+            "21j03262",
+            {
+                "<21J03262>": {"Cloud": {"ConnectionState": "Connected"}},
+                "AirconSystem": {"MasterSerial": "21J03262"},
+                "UserAirconSettings": {"isOn": True, "Mode": "HEAT", "EnabledZones": [True]},
+                "RemoteZoneInfo": [{"NV_Title": "Downstairs", "CanOperate": True}],
+            },
+        )
+        assert status is not None
+        assert status.serial_number == "21j03262"
+        assert status.user_aircon_settings.mode == "HEAT"
+        assert status.zones[0].title == "Downstairs"
+
+    def test_unrelated_payload_is_not_a_snapshot(self) -> None:
+        assert ActronAirAPI._parse_full_status_broadcast("x", {"foo": 1}) is None
+        assert ActronAirAPI._parse_full_status_broadcast("x", {"type": "other"}) is None
