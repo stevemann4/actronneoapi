@@ -39,6 +39,10 @@ _LOGGER = logging.getLogger(__name__)
 
 _MQTT_TOPIC_PREFIX = "actron-cloud"
 _MQTT_PLATFORM_SEGMENT = "neo"
+# Que devices publish under an upper-case platform segment and suffix their
+# channel names with "-broadcast" (for example ``mwc/status-change-broadcast``).
+_MQTT_QUE_PLATFORM_SEGMENT = "QUE"
+_MQTT_TOPIC_BROADCAST_SUFFIX = "-broadcast"
 _MQTT_TOPIC_HEART_BEAT = "mwc/heart-beat"
 _MQTT_TOPIC_FULL_STATUS = "mwc/full-status"
 _MQTT_TOPIC_CMD_RESPONSE = "mwc/cmd-response"
@@ -132,7 +136,7 @@ class MQTTRTClient:
 
         self._details = connection_details
         self._access_token = access_token
-        self._platform_segment = platform_segment.strip().lower()
+        self._platform_segment = platform_segment.strip()
         # The broker only uses the username to attribute a connection, so an
         # unusable value is normalized rather than rejected.
         self._user_email = user_email.strip() or _MQTT_UNKNOWN_USERNAME
@@ -208,6 +212,26 @@ class MQTTRTClient:
             cmd_response=f"{base}/{_MQTT_TOPIC_CMD_RESPONSE}/{machine_segment}/+",
             status_change=f"{base}/{_MQTT_TOPIC_STATUS_CHANGE}",
         )
+
+    @staticmethod
+    def build_system_wildcard_topic(
+        user_id: str,
+        device_serial: str,
+        platform_segment: str = _MQTT_PLATFORM_SEGMENT,
+    ) -> str:
+        """Build a wildcard topic covering every channel of one device."""
+        if not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+        if not device_serial.strip():
+            raise ValueError("device_serial cannot be empty")
+        if not platform_segment.strip():
+            raise ValueError("platform_segment cannot be empty")
+        return f"{_MQTT_TOPIC_PREFIX}/{user_id}/{platform_segment}/{device_serial.lower()}/#"
+
+    @staticmethod
+    def is_que_segment(platform_segment: str) -> bool:
+        """Return whether a platform segment names the Que platform."""
+        return platform_segment.strip().lower() == _MQTT_QUE_PLATFORM_SEGMENT.lower()
 
     @staticmethod
     def build_command_topic(
@@ -299,17 +323,29 @@ class MQTTRTClient:
         device_serial: str,
         machine_id: str | None = None,
     ) -> NeoMQTTTopicSet:
-        """Subscribe to the standard Neo topic set for a device."""
+        """Subscribe to the topic set for a device.
+
+        Neo devices use four fixed channels. Que devices publish on
+        ``-broadcast`` variants of those channels, so one wildcard covering
+        every channel of the device is subscribed instead.
+        """
         topics = self.build_topic_set(
             self._details.user_id,
             device_serial,
             machine_id,
             platform_segment=self._platform_segment,
         )
-        await self.subscribe(topics.heart_beat)
-        await self.subscribe(topics.full_status)
-        await self.subscribe(topics.cmd_response)
-        await self.subscribe(topics.status_change)
+        if self.is_que_segment(self._platform_segment):
+            await self.subscribe(
+                self.build_system_wildcard_topic(
+                    self._details.user_id, device_serial, self._platform_segment
+                )
+            )
+        else:
+            await self.subscribe(topics.heart_beat)
+            await self.subscribe(topics.full_status)
+            await self.subscribe(topics.cmd_response)
+            await self.subscribe(topics.status_change)
         self._subscribed_systems.add(device_serial.lower())
         await self.request_full_status(device_serial)
         return topics
@@ -362,10 +398,17 @@ class MQTTRTClient:
             machine_id,
             platform_segment=self._platform_segment,
         )
-        await self.unsubscribe(topics.heart_beat)
-        await self.unsubscribe(topics.full_status)
-        await self.unsubscribe(topics.cmd_response)
-        await self.unsubscribe(topics.status_change)
+        if self.is_que_segment(self._platform_segment):
+            await self.unsubscribe(
+                self.build_system_wildcard_topic(
+                    self._details.user_id, device_serial, self._platform_segment
+                )
+            )
+        else:
+            await self.unsubscribe(topics.heart_beat)
+            await self.unsubscribe(topics.full_status)
+            await self.unsubscribe(topics.cmd_response)
+            await self.unsubscribe(topics.status_change)
         self._subscribed_systems.discard(device_serial.lower())
 
     async def update_access_token(self, access_token: str) -> None:
@@ -506,12 +549,16 @@ class MQTTRTClient:
 
         domain_model: Any | None = None
 
-        if topic.endswith(_MQTT_TOPIC_FULL_STATUS):
+        if topic.endswith(
+            (_MQTT_TOPIC_FULL_STATUS, _MQTT_TOPIC_FULL_STATUS + _MQTT_TOPIC_BROADCAST_SUFFIX)
+        ):
             try:
                 domain_model = ActronAirStatus.model_validate(payload)
             except Exception as exc:  # pragma: no cover - defensive parsing
                 _LOGGER.warning("Failed to parse MQTT full-status payload: %s", exc)
-        elif topic.endswith(_MQTT_TOPIC_STATUS_CHANGE):
+        elif topic.endswith(
+            (_MQTT_TOPIC_STATUS_CHANGE, _MQTT_TOPIC_STATUS_CHANGE + _MQTT_TOPIC_BROADCAST_SUFFIX)
+        ):
             try:
                 domain_model = ActronAirStatus.model_validate(payload)
             except Exception:
