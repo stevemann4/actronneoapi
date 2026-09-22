@@ -1,7 +1,7 @@
 {
   "domain": "actron_air",
   "name": "Actron Air (patched)",
-  "version": "2026.9.3.post2",
+  "version": "2026.9.3.post3",
   "codeowners": ["@kclif9", "@JagadishDhanamjayam"],
   "config_flow": true,
   "dhcp": [
@@ -16,6 +16,6 @@
   "loggers": ["actron_neo_api"],
   "quality_scale": "silver",
   "requirements": [
-    "https://github.com/stevemann4/actronneoapi/archive/refs/heads/deploy-modelnumber-fix.zip#actron-neo-api==0.5.16.post2"
+    "https://github.com/stevemann4/actronneoapi/archive/refs/heads/deploy-modelnumber-fix.zip#actron-neo-api==0.5.16.post3"
   ]
 }
