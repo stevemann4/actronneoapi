@@ -293,6 +293,7 @@ class MQTTRTClient:
         """Subscribe to a raw MQTT topic."""
         if not topic.strip():
             raise ValueError("topic cannot be empty")
+        _LOGGER.debug("[actron-rt] mqtt subscribe %s", topic)
 
         self._subscriptions.add(topic)
         if self._client is not None:
@@ -438,6 +439,13 @@ class MQTTRTClient:
             try:
                 await self._set_state(RealtimeConnectionState.CONNECTING)
                 await self._ensure_tls_context()
+                _LOGGER.debug(
+                    "[actron-rt] mqtt connecting to %s:%s tls=%s segment=%s",
+                    self._details.endpoint,
+                    self._details.port,
+                    self._details.uses_tls,
+                    self._platform_segment,
+                )
                 client = self._build_client()
                 self._client = client
 
@@ -529,6 +537,7 @@ class MQTTRTClient:
 
     async def _handle_message(self, topic: str, raw_payload: bytes) -> None:
         """Decode a raw MQTT message and forward it to the event queue."""
+        _LOGGER.debug("[actron-rt] mqtt %s: %.300s", topic, raw_payload)
         try:
             payload = self._decode_payload(raw_payload)
         except json.JSONDecodeError as exc:
