@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "actron-neo-api"
-dynamic = ["version"]
+version = "0.5.16.post1"
 authors = [
   { name="Kurt Chrisford", email="soft.year7030@fastmail.com" },
 ]
@@ -36,8 +36,6 @@ dev = [
 Homepage = "https://github.com/kclif9/actronneoapi"
 Issues = "https://github.com/kclif9/actronneoapi/issues"
 
-[tool.hatch.version]
-source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/actron_neo_api"]
